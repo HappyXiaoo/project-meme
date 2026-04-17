@@ -46,6 +46,8 @@ GROUP_TERMS = [
     "这些人",
     "那群人",
     "某些人",
+    "这个群体",
+    "这种群体",
     "男人",
     "女人",
     "男的",
@@ -105,6 +107,54 @@ MEME_PHRASES = [
     "典中典",
 ]
 
+MITIGATION_TERMS = [
+    "反对",
+    "抵制",
+    "谴责",
+    "批评",
+    "避免",
+    "禁止",
+    "不应该",
+    "不能",
+    "不要",
+    "应当避免",
+    "应该避免",
+]
+
+REPORTING_TERMS = [
+    "言论",
+    "说法",
+    "表述",
+    "行为",
+    "发言",
+    "评论",
+    "内容",
+    "现象",
+    "问题",
+    "审核",
+    "举报",
+    "描述",
+    "讨论",
+]
+
+ANALYSIS_TERMS = [
+    "像是",
+    "带有",
+    "属于",
+    "涉嫌",
+    "存在",
+    "可能",
+    "会",
+]
+
+STRONG_ATTACK_PATTERNS = [
+    re.compile(r"不配.{0,8}(尊重|活着|存在)"),
+    re.compile(r"低人一等"),
+    re.compile(r"滚出去"),
+    re.compile(r"天生.{0,6}(差|贱|坏|低等)"),
+    re.compile(r"(杂种|废物|垃圾|贱种)"),
+]
+
 TEMPLATE_PATTERNS = [
     re.compile(r"不是.{0,12}但是"),
     re.compile(r"我不是.{0,12}但是"),
@@ -141,6 +191,11 @@ class MemeExpressionFeatureExtractor(BaseEstimator, TransformerMixin):
         "punctuation_burst_hits",
         "repeated_character_hits",
         "risk_group_cooccurrence",
+        "mitigation_hits",
+        "reporting_hits",
+        "analysis_hits",
+        "direct_attack_pattern_hits",
+        "meme_group_cooccurrence",
     ]
 
     def fit(self, X: Any, y: Any = None) -> "MemeExpressionFeatureExtractor":
@@ -168,6 +223,13 @@ class MemeExpressionFeatureExtractor(BaseEstimator, TransformerMixin):
             float(len(re.findall(r"[!?！？]{2,}", normalized))),
             float(len(re.findall(r"(.)\1{2,}", normalized))),
             1.0 if group_hits > 0 and risk_hits > 0 else 0.0,
+            float(sum(normalized.count(term) for term in MITIGATION_TERMS)),
+            float(sum(normalized.count(term) for term in REPORTING_TERMS)),
+            float(sum(normalized.count(term) for term in ANALYSIS_TERMS)),
+            float(sum(bool(pattern.search(normalized)) for pattern in STRONG_ATTACK_PATTERNS)),
+            1.0
+            if group_hits > 0 and sum(normalized.count(term) for term in MEME_PHRASES) > 0
+            else 0.0,
         ]
 
 
@@ -391,13 +453,25 @@ class TextMemeClassifier:
 
         probabilities = self.model.predict_proba([clean_text])[0]
         model_score = float(probabilities[1])
-        hit_count = self._count_risk_keywords(clean_text)
+        context = self._analyze_expression_context(clean_text)
+        hit_count = context["risk_hits"]
 
-        # 对明显攻击性表达增加一层关键词增强，保证演示效果更稳定。
-        if hit_count > 0:
-            score = max(model_score, min(0.62 + 0.08 * hit_count, 0.95))
+        # 对明显攻击性表达增加一层增强；如果是反对/描述性语境，则避免被敏感词直接拉高。
+        if context["direct_attack"] or context["meme_attack"]:
+            score = max(model_score, min(0.6 + 0.06 * max(hit_count, 1), 0.9))
             label = 1
-            message = "模型结果已结合风险关键词进行增强判断，建议进一步人工审核。"
+            message = "模型结果已结合模因式表达与攻击模式进行增强判断，建议进一步人工审核。"
+        elif hit_count > 0 and context["mitigated"]:
+            score = min(model_score, 0.45)
+            label = 0
+            message = "文本包含敏感词，但更接近描述、反对或分析语境，系统未直接判为风险文本。"
+        elif hit_count > 0:
+            score = max(model_score, min(0.48 + 0.04 * hit_count, 0.72))
+            label = int(score >= 0.5)
+            if label == 1:
+                message = "模型根据文本内容与风险词信号判定该文本具有一定风险。"
+            else:
+                message = "文本包含部分风险信号，但当前证据不足以直接判为风险文本。"
         else:
             score = model_score
             label = int(score >= 0.5)
@@ -453,14 +527,28 @@ class TextMemeClassifier:
         self.model = pipeline
 
     def _predict_with_rules(self, text: str) -> PredictionResult:
-        hit_count = self._count_risk_keywords(text)
-        label = 1 if hit_count > 0 else 0
-        score = min(0.58 + 0.08 * hit_count, 0.95) if label == 1 else 0.18
-        message = (
-            "当前使用规则模式返回结果，后续模型训练完成后会输出更稳定的预测。"
-            if label == 1
-            else "当前使用规则模式，文本未触发明显风险关键词。"
-        )
+        context = self._analyze_expression_context(text)
+        hit_count = context["risk_hits"]
+        if context["direct_attack"] or context["meme_attack"]:
+            label = 1
+            score = min(0.6 + 0.06 * max(hit_count, 1), 0.9)
+            message = "当前使用规则模式，文本触发了明显攻击性或模因式风险表达。"
+        elif hit_count > 0 and context["mitigated"]:
+            label = 0
+            score = 0.3
+            message = "当前使用规则模式，文本包含敏感词，但整体更接近描述或反对语境。"
+        elif hit_count > 0:
+            label = 1 if hit_count >= 2 else 0
+            score = min(0.46 + 0.05 * hit_count, 0.75) if label == 1 else 0.4
+            message = (
+                "当前使用规则模式，文本存在一定风险信号。"
+                if label == 1
+                else "当前使用规则模式，文本存在弱风险信号，但证据不足。"
+            )
+        else:
+            label = 0
+            score = 0.18
+            message = "当前使用规则模式，文本未触发明显风险关键词。"
 
         return PredictionResult(
             label=label,
@@ -471,3 +559,31 @@ class TextMemeClassifier:
 
     def _count_risk_keywords(self, text: str) -> int:
         return sum(1 for keyword in self.risk_keywords if keyword in text)
+
+    def _analyze_expression_context(self, text: str) -> dict[str, Any]:
+        group_hits = sum(text.count(term) for term in GROUP_TERMS)
+        risk_hits = sum(text.count(term) for term in self.risk_keywords)
+        mitigation_hits = sum(text.count(term) for term in MITIGATION_TERMS)
+        reporting_hits = sum(text.count(term) for term in REPORTING_TERMS)
+        analysis_hits = sum(text.count(term) for term in ANALYSIS_TERMS)
+        meme_hits = sum(text.count(term) for term in MEME_PHRASES)
+        direct_attack_pattern_hits = sum(
+            bool(pattern.search(text)) for pattern in STRONG_ATTACK_PATTERNS
+        )
+
+        direct_attack = direct_attack_pattern_hits > 0 or (group_hits > 0 and risk_hits > 0)
+        mitigated = (mitigation_hits + reporting_hits + analysis_hits) > 0 and not direct_attack
+        meme_attack = meme_hits > 0 and (group_hits > 0 or risk_hits > 0) and not mitigated
+
+        return {
+            "group_hits": group_hits,
+            "risk_hits": risk_hits,
+            "mitigation_hits": mitigation_hits,
+            "reporting_hits": reporting_hits,
+            "analysis_hits": analysis_hits,
+            "meme_hits": meme_hits,
+            "direct_attack_pattern_hits": direct_attack_pattern_hits,
+            "direct_attack": direct_attack,
+            "mitigated": mitigated,
+            "meme_attack": meme_attack,
+        }
