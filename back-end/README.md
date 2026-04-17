@@ -36,6 +36,45 @@ python scripts/train_model.py
 python scripts/train_model.py --model-type baseline
 ```
 
+## BERT 版骨架
+
+当前已经提供 BERT 版训练脚本和目录骨架：
+
+- 训练入口：`python scripts/train_bert.py`
+- 配置对象：`back-end/bert/config.py`
+- 数据拆分：`back-end/bert/data.py`
+- 训练流程：`back-end/bert/train.py`
+- 依赖清单：`back-end/requirements-bert.txt`
+
+建议训练方式：
+
+1. 先在本地用 CPU 做 smoke test
+2. 确认流程跑通后，再在 GPU 环境做正式训练
+
+本地 smoke test 示例：
+
+```text
+python scripts/train_bert.py --smoke-test --cpu-only --train-sample-limit 128 --eval-sample-limit 64
+```
+
+正式训练示例：
+
+```text
+python scripts/train_bert.py --model-name bert-base-chinese --epochs 2
+```
+
+默认会输出到：
+
+- `back-end/artifacts-bert-v1/model/`
+- `back-end/artifacts-bert-v1/metrics.json`
+- `back-end/artifacts-bert-v1/metadata.json`
+
+注意事项：
+
+- 当前机器上尚未安装 `torch` 和 `transformers`
+- 如果本机 Python 版本无法安装 torch，建议在租用的 GPU 环境中创建 Python 3.10/3.11 虚拟环境后再训练
+- BERT 版目前只完成了训练骨架，后续可再接入后端推理服务
+
 默认会输出：
 
 - `back-end/artifacts/model.joblib`

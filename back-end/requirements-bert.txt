@@ -1,0 +1,6 @@
+# 建议在 Python 3.10 或 3.11 环境下使用这份依赖。
+# 如果当前本机 Python 版本不兼容 torch，可在租用的 GPU 环境中安装。
+
+torch
+transformers
+accelerate
