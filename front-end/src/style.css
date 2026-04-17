@@ -155,7 +155,8 @@ textarea {
 
 .stats-grid,
 .workspace-grid,
-.info-grid {
+.info-grid,
+.service-grid {
   display: grid;
   gap: 18px;
   margin-top: 22px;
@@ -170,6 +171,10 @@ textarea {
   align-items: start;
 }
 
+.service-grid {
+  grid-template-columns: repeat(4, 1fr);
+}
+
 .info-grid {
   grid-template-columns: repeat(3, 1fr);
 }
@@ -178,6 +183,10 @@ textarea {
 .panel,
 .info-card {
   padding: 22px;
+}
+
+.status-panel {
+  margin-top: 22px;
 }
 
 .panel-head {
@@ -348,7 +357,8 @@ textarea {
   .hero-header,
   .workspace-grid,
   .stats-grid,
-  .info-grid {
+  .info-grid,
+  .service-grid {
     grid-template-columns: 1fr;
   }
 
