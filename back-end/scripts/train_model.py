@@ -10,7 +10,7 @@ PROJECT_DIR = BACKEND_DIR.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.services.classifier import train_and_save_model
+from app.services.classifier import DEFAULT_MODEL_TYPE, SUPPORTED_MODEL_TYPES, train_and_save_model
 
 
 def parse_args() -> argparse.Namespace:
@@ -27,6 +27,13 @@ def parse_args() -> argparse.Namespace:
         default=BACKEND_DIR / "artifacts",
         help="模型与指标输出目录。",
     )
+    parser.add_argument(
+        "--model-type",
+        type=str,
+        default=DEFAULT_MODEL_TYPE,
+        choices=sorted(SUPPORTED_MODEL_TYPES),
+        help="模型类型，可选 baseline 或 meme_features_v1。",
+    )
     return parser.parse_args()
 
 
@@ -35,6 +42,7 @@ def main() -> None:
     summary = train_and_save_model(
         data_path=args.data_path.resolve(),
         artifact_dir=args.artifact_dir.resolve(),
+        model_type=args.model_type,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

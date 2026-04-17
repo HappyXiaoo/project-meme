@@ -6,4 +6,5 @@ back-end/app/__pycache__/
 back-end/app/schemas/__pycache__/
 back-end/app/services/__pycache__/
 back-end/artifacts/
+back-end/artifacts-*/
 back-end/*.log

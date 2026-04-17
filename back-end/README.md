@@ -18,6 +18,7 @@
 - 优先读取项目根目录中的 `data/data.csv`
 - 训练脚本会将模型保存到 `back-end/artifacts/`
 - 使用中文字符级 `TF-IDF + LogisticRegression`
+- 当前默认训练配置为 `meme_features_v1`
 - 服务启动时优先加载已训练模型
 - 如果本地模型不存在，则回退到内存训练；再失败时回退到规则判断模式
 
@@ -27,6 +28,12 @@
 
 ```text
 python scripts/train_model.py
+```
+
+如需训练基线模型，可执行：
+
+```text
+python scripts/train_model.py --model-type baseline
 ```
 
 默认会输出：

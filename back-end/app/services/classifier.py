@@ -3,20 +3,27 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 import joblib
+import numpy as np
 import pandas as pd
+from scipy.sparse import csr_matrix
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline
+from sklearn.pipeline import FeatureUnion, Pipeline
 
 LABEL_MAPPING = {
     0: "正常文本",
     1: "疑似有害文本",
 }
+
+DEFAULT_MODEL_TYPE = "meme_features_v1"
+SUPPORTED_MODEL_TYPES = {"baseline", "meme_features_v1"}
 
 RISK_KEYWORDS = [
     "仇恨",
@@ -34,6 +41,79 @@ RISK_KEYWORDS = [
     "杂种",
 ]
 
+GROUP_TERMS = [
+    "他们",
+    "这些人",
+    "那群人",
+    "某些人",
+    "男人",
+    "女人",
+    "男的",
+    "女的",
+    "本地人",
+    "外地人",
+    "中国人",
+    "外国人",
+    "黑人",
+    "白人",
+    "黄种人",
+    "穆斯林",
+    "留学生",
+    "网友",
+]
+
+INTENSIFIER_TERMS = [
+    "太",
+    "真",
+    "真的",
+    "非常",
+    "特别",
+    "简直",
+    "根本",
+    "天生",
+]
+
+SARCASM_MARKERS = [
+    "呵呵",
+    "笑死",
+    "也是没谁了",
+    "就这",
+    "还搁这",
+    "真有你的",
+    "典中典",
+    "某些人",
+]
+
+CONTRAST_MARKERS = [
+    "我们",
+    "他们",
+    "这种人",
+    "那种人",
+    "一类人",
+    "本地人",
+    "外地人",
+]
+
+MEME_PHRASES = [
+    "不是我说",
+    "某些人",
+    "果然",
+    "建议把",
+    "还搁这",
+    "就这",
+    "也是没谁了",
+    "典中典",
+]
+
+TEMPLATE_PATTERNS = [
+    re.compile(r"不是.{0,12}但是"),
+    re.compile(r"我不是.{0,12}但是"),
+    re.compile(r"不是我说"),
+    re.compile(r"某些人"),
+    re.compile(r"果然.{0,10}都"),
+    re.compile(r"建议把.{0,10}都"),
+]
+
 
 @dataclass
 class PredictionResult:
@@ -48,6 +128,47 @@ class ArtifactPaths:
     model_path: Path
     metrics_path: Path
     metadata_path: Path
+
+
+class MemeExpressionFeatureExtractor(BaseEstimator, TransformerMixin):
+    feature_names = [
+        "template_pattern_hits",
+        "group_reference_hits",
+        "intensifier_hits",
+        "sarcasm_hits",
+        "contrast_hits",
+        "meme_phrase_hits",
+        "punctuation_burst_hits",
+        "repeated_character_hits",
+        "risk_group_cooccurrence",
+    ]
+
+    def fit(self, X: Any, y: Any = None) -> "MemeExpressionFeatureExtractor":
+        return self
+
+    def transform(self, X: Any) -> csr_matrix:
+        rows = [self._extract_features(str(text)) for text in X]
+        return csr_matrix(np.asarray(rows, dtype=float))
+
+    def get_feature_names_out(self, input_features: Any = None) -> np.ndarray:
+        return np.asarray(self.feature_names, dtype=object)
+
+    def _extract_features(self, text: str) -> list[float]:
+        normalized = text.strip()
+        group_hits = sum(normalized.count(term) for term in GROUP_TERMS)
+        risk_hits = sum(normalized.count(term) for term in RISK_KEYWORDS)
+
+        return [
+            float(sum(bool(pattern.search(normalized)) for pattern in TEMPLATE_PATTERNS)),
+            float(group_hits),
+            float(sum(normalized.count(term) for term in INTENSIFIER_TERMS)),
+            float(sum(normalized.count(term) for term in SARCASM_MARKERS)),
+            float(sum(normalized.count(term) for term in CONTRAST_MARKERS)),
+            float(sum(normalized.count(term) for term in MEME_PHRASES)),
+            float(len(re.findall(r"[!?！？]{2,}", normalized))),
+            float(len(re.findall(r"(.)\1{2,}", normalized))),
+            1.0 if group_hits > 0 and risk_hits > 0 else 0.0,
+        ]
 
 
 def get_artifact_paths(artifact_dir: Path) -> ArtifactPaths:
@@ -93,19 +214,45 @@ def load_dataset(data_path: Path) -> pd.DataFrame:
     return dataset
 
 
-def build_pipeline() -> Pipeline:
+def get_feature_summary(model_type: str) -> dict[str, Any]:
+    if model_type == "baseline":
+        return {
+            "vectorizer": "char_tfidf_1_3",
+            "extra_features": [],
+        }
+
+    return {
+        "vectorizer": "char_tfidf_1_3",
+        "extra_features": MemeExpressionFeatureExtractor.feature_names,
+    }
+
+
+def build_pipeline(model_type: str = DEFAULT_MODEL_TYPE) -> Pipeline:
+    validate_model_type(model_type)
+
+    tfidf = TfidfVectorizer(
+        analyzer="char",
+        ngram_range=(1, 3),
+        min_df=2,
+        lowercase=False,
+        sublinear_tf=True,
+    )
+
+    if model_type == "baseline":
+        feature_block: Any = tfidf
+        feature_step_name = "tfidf"
+    else:
+        feature_block = FeatureUnion(
+            transformer_list=[
+                ("tfidf", tfidf),
+                ("meme_features", MemeExpressionFeatureExtractor()),
+            ]
+        )
+        feature_step_name = "features"
+
     return Pipeline(
         steps=[
-            (
-                "tfidf",
-                TfidfVectorizer(
-                    analyzer="char",
-                    ngram_range=(1, 3),
-                    min_df=2,
-                    lowercase=False,
-                    sublinear_tf=True,
-                ),
-            ),
+            (feature_step_name, feature_block),
             (
                 "clf",
                 LogisticRegression(
@@ -126,7 +273,20 @@ def compute_metrics(y_true: pd.Series, y_pred: Any) -> dict[str, float]:
     }
 
 
-def train_and_save_model(data_path: Path, artifact_dir: Path) -> dict[str, Any]:
+def validate_model_type(model_type: str) -> None:
+    if model_type not in SUPPORTED_MODEL_TYPES:
+        raise ValueError(
+            f"unsupported model_type: {model_type}. "
+            f"expected one of {sorted(SUPPORTED_MODEL_TYPES)}"
+        )
+
+
+def train_and_save_model(
+    data_path: Path,
+    artifact_dir: Path,
+    model_type: str = DEFAULT_MODEL_TYPE,
+) -> dict[str, Any]:
+    validate_model_type(model_type)
     dataset = load_dataset(data_path)
 
     train_df, test_df = train_test_split(
@@ -136,7 +296,7 @@ def train_and_save_model(data_path: Path, artifact_dir: Path) -> dict[str, Any]:
         stratify=dataset["label"],
     )
 
-    pipeline = build_pipeline()
+    pipeline = build_pipeline(model_type=model_type)
     pipeline.fit(train_df["text"], train_df["label"])
 
     predictions = pipeline.predict(test_df["text"])
@@ -148,6 +308,7 @@ def train_and_save_model(data_path: Path, artifact_dir: Path) -> dict[str, Any]:
     joblib.dump(pipeline, artifact_paths.model_path)
 
     metadata = {
+        "model_type": model_type,
         "sample_count": int(len(dataset)),
         "train_count": int(len(train_df)),
         "test_count": int(len(test_df)),
@@ -156,6 +317,7 @@ def train_and_save_model(data_path: Path, artifact_dir: Path) -> dict[str, Any]:
             for label, count in dataset["label"].value_counts().sort_index().items()
         },
         "data_path": str(data_path),
+        "feature_summary": get_feature_summary(model_type),
     }
 
     artifact_paths.metrics_path.write_text(
@@ -169,6 +331,7 @@ def train_and_save_model(data_path: Path, artifact_dir: Path) -> dict[str, Any]:
 
     return {
         "artifact_dir": str(artifact_dir),
+        "model_type": model_type,
         "model_path": str(artifact_paths.model_path),
         "metrics_path": str(artifact_paths.metrics_path),
         "metadata_path": str(artifact_paths.metadata_path),
@@ -181,9 +344,16 @@ def train_and_save_model(data_path: Path, artifact_dir: Path) -> dict[str, Any]:
 
 
 class TextMemeClassifier:
-    def __init__(self, data_path: Path, artifact_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        data_path: Path,
+        artifact_dir: Path | None = None,
+        model_type: str = DEFAULT_MODEL_TYPE,
+    ) -> None:
+        validate_model_type(model_type)
         self.data_path = data_path
         self.artifact_dir = artifact_dir
+        self.model_type = model_type
         self.mode = "rule"
         self.sample_count = 0
         self.metrics: dict[str, float] = {}
@@ -263,6 +433,7 @@ class TextMemeClassifier:
                 artifact_paths.metadata_path.read_text(encoding="utf-8")
             )
             self.sample_count = int(metadata.get("sample_count", 0))
+            self.model_type = metadata.get("model_type", self.model_type)
 
         return True
 
@@ -274,7 +445,7 @@ class TextMemeClassifier:
             stratify=dataset["label"],
         )
 
-        pipeline = build_pipeline()
+        pipeline = build_pipeline(model_type=self.model_type)
         pipeline.fit(train_df["text"], train_df["label"])
 
         predictions = pipeline.predict(test_df["text"])
