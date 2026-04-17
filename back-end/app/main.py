@@ -11,11 +11,12 @@ from app.services.classifier import TextMemeClassifier
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 DATA_PATH = BASE_DIR / "data" / "data.csv"
+ARTIFACT_DIR = BASE_DIR / "back-end" / "artifacts"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    classifier = TextMemeClassifier(data_path=DATA_PATH)
+    classifier = TextMemeClassifier(data_path=DATA_PATH, artifact_dir=ARTIFACT_DIR)
     classifier.initialize()
     app.state.classifier = classifier
     yield
