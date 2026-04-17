@@ -1,0 +1,4 @@
+fastapi==0.136.0
+uvicorn==0.44.0
+pandas==3.0.2
+scikit-learn==1.8.0

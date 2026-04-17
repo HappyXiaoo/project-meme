@@ -1,1 +1,7 @@
 front-end/node_modules/
+front-end/dist/
+back-end/.venv/
+back-end/__pycache__/
+back-end/app/__pycache__/
+back-end/app/schemas/__pycache__/
+back-end/app/services/__pycache__/
