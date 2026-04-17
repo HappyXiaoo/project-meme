@@ -1,5 +1,5 @@
 front-end/node_modules/
-front-end/dist/
+#front-end/dist/
 back-end/.venv/
 back-end/__pycache__/
 back-end/app/__pycache__/
