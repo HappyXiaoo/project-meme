@@ -63,6 +63,27 @@ python scripts/train_bert.py --smoke-test --cpu-only --train-sample-limit 128 --
 python scripts/train_bert.py --model-name bert-base-chinese --epochs 2
 ```
 
+批量预测样例示例：
+
+```text
+python scripts/predict_bert_samples.py
+```
+
+如果要使用自定义样例文件：
+
+```text
+python scripts/predict_bert_samples.py --samples-json /path/to/samples.json
+```
+
+样例文件格式：
+
+```json
+{
+  "B01": "这个群体根本不配得到尊重。",
+  "B02": "我反对任何形式的歧视言论。"
+}
+```
+
 默认会输出到：
 
 - `back-end/artifacts-bert-v1/model/`
