@@ -84,6 +84,19 @@ python scripts/predict_bert_samples.py --samples-json /path/to/samples.json
 }
 ```
 
+三模型人工测试集对比示例：
+
+```text
+python scripts/compare_models_on_testset.py --output-csv back-end/model_compare_results.csv
+```
+
+该脚本会：
+
+- 读取 `data/manual_test_set.csv`
+- 分别运行基线模型、模因特征模型和 BERT 模型
+- 输出 JSON 汇总和 Markdown 对比表
+- 可选保存详细结果 CSV
+
 默认会输出到：
 
 - `back-end/artifacts-bert-v1/model/`

@@ -7,6 +7,7 @@
 - [实验记录.md](/d:/code/project-meme/docs/实验记录.md)：记录每次实验目的、改动点和指标结果
 - [模型说明.md](/d:/code/project-meme/docs/模型说明.md)：用人话解释当前模型原理和后续改进方向
 - [测试样例.md](/d:/code/project-meme/docs/测试样例.md)：整理测试输入、预期结果和实际结果
+- [人工测试集说明.md](/d:/code/project-meme/docs/人工测试集说明.md)：说明人工构造测试集的用途和使用方式
 
 ## 建议习惯
 
