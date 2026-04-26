@@ -9,7 +9,7 @@
       <section class="stats-grid">
         <article class="stat-card">
           <span>页面状态</span>
-          <strong>可演示</strong>
+          <strong>最终展示版</strong>
         </article>
         <article class="stat-card">
           <span>联调状态</span>
@@ -63,6 +63,8 @@
       </section>
 
       <HistoryPanel :items="historyList" />
+      <ModelSummaryPanel />
+      <ScenarioPanel />
       <InfoPanel />
     </main>
   </div>
@@ -74,13 +76,15 @@ import AppHeader from './components/AppHeader.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
 import InfoPanel from './components/InfoPanel.vue'
 import InputPanel from './components/InputPanel.vue'
+import ModelSummaryPanel from './components/ModelSummaryPanel.vue'
 import ResultPanel from './components/ResultPanel.vue'
+import ScenarioPanel from './components/ScenarioPanel.vue'
 import { checkBackendHealth, predictText } from './api/predict'
 
 const examples = [
-  '这个群体天生就比别人差，根本不配得到尊重。',
-  '这家店的服务一般，但整体环境还是比较干净的。',
-  '这种言论带有明显侮辱性，应该进行进一步审核。'
+  '这个群体根本不配得到尊重。',
+  '我反对任何形式的歧视言论。',
+  '不是我说，某些人真的是典中典。'
 ]
 
 const inputText = ref('')
@@ -96,11 +100,7 @@ const latestLabel = computed(() => {
 })
 
 const backendStatusText = computed(() => {
-  if (backendAvailable.value) {
-    return '已连接后端'
-  }
-
-  return '使用前端 mock'
+  return backendAvailable.value ? '已连接后端' : '使用前端 mock'
 })
 
 const backendMode = computed(() => {
@@ -108,7 +108,15 @@ const backendMode = computed(() => {
     return '未连接'
   }
 
-  return backendHealth.value.mode === 'ml' ? '机器学习模式' : '规则模式'
+  if (backendHealth.value.mode === 'artifact') {
+    return '已加载训练产物'
+  }
+
+  if (backendHealth.value.mode === 'ml') {
+    return '机器学习模式'
+  }
+
+  return '规则模式'
 })
 
 const backendSampleCount = computed(() => {
@@ -162,11 +170,7 @@ async function handleSubmit() {
       ...historyList.value
     ].slice(0, 5)
 
-    if (response.source === 'api') {
-      backendAvailable.value = true
-    } else {
-      backendAvailable.value = false
-    }
+    backendAvailable.value = response.source === 'api'
   } finally {
     loading.value = false
   }
