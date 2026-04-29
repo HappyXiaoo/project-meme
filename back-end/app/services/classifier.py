@@ -209,28 +209,35 @@ class MemeExpressionFeatureExtractor(BaseEstimator, TransformerMixin):
         return np.asarray(self.feature_names, dtype=object)
 
     def _extract_features(self, text: str) -> list[float]:
-        normalized = text.strip()
-        group_hits = sum(normalized.count(term) for term in GROUP_TERMS)
-        risk_hits = sum(normalized.count(term) for term in RISK_KEYWORDS)
+        return extract_meme_feature_vector(text)
 
-        return [
-            float(sum(bool(pattern.search(normalized)) for pattern in TEMPLATE_PATTERNS)),
-            float(group_hits),
-            float(sum(normalized.count(term) for term in INTENSIFIER_TERMS)),
-            float(sum(normalized.count(term) for term in SARCASM_MARKERS)),
-            float(sum(normalized.count(term) for term in CONTRAST_MARKERS)),
-            float(sum(normalized.count(term) for term in MEME_PHRASES)),
-            float(len(re.findall(r"[!?！？]{2,}", normalized))),
-            float(len(re.findall(r"(.)\1{2,}", normalized))),
-            1.0 if group_hits > 0 and risk_hits > 0 else 0.0,
-            float(sum(normalized.count(term) for term in MITIGATION_TERMS)),
-            float(sum(normalized.count(term) for term in REPORTING_TERMS)),
-            float(sum(normalized.count(term) for term in ANALYSIS_TERMS)),
-            float(sum(bool(pattern.search(normalized)) for pattern in STRONG_ATTACK_PATTERNS)),
-            1.0
-            if group_hits > 0 and sum(normalized.count(term) for term in MEME_PHRASES) > 0
-            else 0.0,
-        ]
+
+def extract_meme_feature_vector(text: str) -> list[float]:
+    normalized = str(text).strip()
+    group_hits = sum(normalized.count(term) for term in GROUP_TERMS)
+    risk_hits = sum(normalized.count(term) for term in RISK_KEYWORDS)
+    meme_hits = sum(normalized.count(term) for term in MEME_PHRASES)
+
+    return [
+        float(sum(bool(pattern.search(normalized)) for pattern in TEMPLATE_PATTERNS)),
+        float(group_hits),
+        float(sum(normalized.count(term) for term in INTENSIFIER_TERMS)),
+        float(sum(normalized.count(term) for term in SARCASM_MARKERS)),
+        float(sum(normalized.count(term) for term in CONTRAST_MARKERS)),
+        float(meme_hits),
+        float(len(re.findall(r"[!?！？]{2,}", normalized))),
+        float(len(re.findall(r"(.)\1{2,}", normalized))),
+        1.0 if group_hits > 0 and risk_hits > 0 else 0.0,
+        float(sum(normalized.count(term) for term in MITIGATION_TERMS)),
+        float(sum(normalized.count(term) for term in REPORTING_TERMS)),
+        float(sum(normalized.count(term) for term in ANALYSIS_TERMS)),
+        float(sum(bool(pattern.search(normalized)) for pattern in STRONG_ATTACK_PATTERNS)),
+        1.0 if group_hits > 0 and meme_hits > 0 else 0.0,
+    ]
+
+
+def get_meme_feature_names() -> list[str]:
+    return list(MemeExpressionFeatureExtractor.feature_names)
 
 
 def get_artifact_paths(artifact_dir: Path) -> ArtifactPaths:

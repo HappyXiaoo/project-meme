@@ -63,6 +63,34 @@ python scripts/train_bert.py --smoke-test --cpu-only --train-sample-limit 128 --
 python scripts/train_bert.py --model-name bert-base-chinese --epochs 2
 ```
 
+## BERT+模因特征融合骨架
+
+当前已经提供融合模型的最小可跑骨架：
+
+- 配置对象：`back-end/bert_fusion/config.py`
+- 数据集封装：`back-end/bert_fusion/data.py`
+- 融合模型：`back-end/bert_fusion/model.py`
+- 训练流程：`back-end/bert_fusion/train.py`
+- 训练入口：`python scripts/train_bert_meme.py`
+
+融合模型核心思路：
+
+- 先用 BERT 提取 `[CLS]` 语义向量
+- 再提取模因式表达特征向量
+- 将两者拼接后输入分类层
+
+smoke test 示例：
+
+```text
+python scripts/train_bert_meme.py --smoke-test --train-sample-limit 128 --eval-sample-limit 64
+```
+
+正式训练示例：
+
+```text
+python scripts/train_bert_meme.py --model-name bert-base-chinese --epochs 2
+```
+
 批量预测样例示例：
 
 ```text
