@@ -64,3 +64,28 @@ class BertMemeFusionModel(nn.Module):
             hidden_states=bert_outputs.hidden_states,
             attentions=bert_outputs.attentions,
         )
+
+    @classmethod
+    def from_pretrained_fusion(
+        cls,
+        model_dir,
+        *,
+        model_name: str,
+        fusion_hidden_size: int = 128,
+        dropout: float = 0.1,
+        num_labels: int = 2,
+        torch_module=None,
+    ):
+        torch = torch_module
+        model = cls(
+            model_name=model_name,
+            fusion_hidden_size=fusion_hidden_size,
+            dropout=dropout,
+            num_labels=num_labels,
+        )
+        weight_file = model_dir / "pytorch_model.bin"
+        if not weight_file.exists():
+            raise FileNotFoundError(f"fusion model weight not found: {weight_file}")
+        state_dict = torch.load(weight_file, map_location="cpu")
+        model.load_state_dict(state_dict)
+        return model

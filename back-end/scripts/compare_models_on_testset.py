@@ -16,7 +16,7 @@ from app.services.classifier import LABEL_MAPPING, TextMemeClassifier
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="在人工测试集上对比基线模型、模因特征模型和 BERT 模型。")
+    parser = argparse.ArgumentParser(description="在人工测试集上对比基线模型、模因特征模型、BERT 模型和融合模型。")
     parser.add_argument(
         "--testset",
         type=Path,
@@ -46,6 +46,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=BACKEND_DIR / "artifacts-bert-v1" / "model",
         help="BERT 模型目录。",
+    )
+    parser.add_argument(
+        "--bert-meme-model-dir",
+        type=Path,
+        default=BACKEND_DIR / "artifacts-bert-meme-v1" / "model",
+        help="BERT+模因特征融合模型目录。",
     )
     parser.add_argument(
         "--output-csv",
@@ -139,6 +145,68 @@ def run_bert_model(model_dir: Path, texts: list[str]) -> tuple[str, list[dict[st
     return device, predictions
 
 
+def run_bert_meme_model(model_dir: Path, texts: list[str]) -> tuple[str, list[dict[str, object]]]:
+    try:
+        import torch
+        from transformers import AutoTokenizer
+
+        from app.services.classifier import extract_meme_feature_vector
+        from bert_fusion.model import BertMemeFusionModel
+    except Exception as error:  # pragma: no cover
+        raise RuntimeError("缺少融合模型预测依赖，请先安装 torch 和 transformers。") from error
+
+    if not model_dir.exists():
+        raise FileNotFoundError(f"bert meme model dir not found: {model_dir}")
+
+    metadata_path = model_dir.parent / "metadata.json"
+    fusion_hidden_size = 128
+    dropout = 0.1
+    base_model_name = "bert-base-chinese"
+    if metadata_path.exists():
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        fusion_hidden_size = int(metadata.get("fusion_hidden_size", fusion_hidden_size))
+        dropout = float(metadata.get("dropout", dropout))
+        base_model_name = metadata.get("model_name", base_model_name)
+
+    tokenizer = AutoTokenizer.from_pretrained(model_dir)
+    model = BertMemeFusionModel.from_pretrained_fusion(
+        model_dir,
+        model_name=base_model_name,
+        fusion_hidden_size=fusion_hidden_size,
+        dropout=dropout,
+        num_labels=2,
+        torch_module=torch,
+    )
+    model.eval()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device)
+
+    predictions = []
+    for text in texts:
+        inputs = tokenizer(
+            text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=128,
+        )
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        meme_features = torch.tensor([extract_meme_feature_vector(text)], dtype=torch.float32, device=device)
+        with torch.no_grad():
+            outputs = model(**inputs, meme_features=meme_features)
+            probabilities = torch.softmax(outputs.logits, dim=-1)[0]
+            label = int(torch.argmax(probabilities).item())
+            score = float(probabilities[label].item())
+        predictions.append(
+            {
+                "label": label,
+                "label_name": LABEL_MAPPING[label],
+                "score": round(score, 4),
+            }
+        )
+
+    return device, predictions
+
+
 def add_prediction_columns(
     df: pd.DataFrame,
     prefix: str,
@@ -151,7 +219,7 @@ def add_prediction_columns(
 
 
 def build_summary(df: pd.DataFrame) -> dict[str, object]:
-    model_prefixes = ["baseline", "meme", "bert"]
+    model_prefixes = ["baseline", "meme", "bert", "bert_meme"]
     overall = {}
     by_category = {}
 
@@ -180,21 +248,22 @@ def format_prediction_cell(label_name: str, score: float) -> str:
 
 def to_markdown(df: pd.DataFrame, summary: dict[str, object]) -> str:
     lines = [
-        "## 三模型对比结果",
+        "## 四模型对比结果",
         "",
-        "| 编号 | 类别 | 预期结果 | 基线模型 | 模因特征模型 | BERT 模型 |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| 编号 | 类别 | 预期结果 | 基线模型 | 模因特征模型 | BERT 模型 | 融合模型 |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
 
     for _, row in df.iterrows():
         lines.append(
-            "| {id} | {category} | {expected} | {baseline} | {meme} | {bert} |".format(
+            "| {id} | {category} | {expected} | {baseline} | {meme} | {bert} | {bert_meme} |".format(
                 id=row["id"],
                 category=row["category"],
                 expected=LABEL_MAPPING[int(row["label"])],
                 baseline=format_prediction_cell(row["baseline_label_name"], row["baseline_score"]),
                 meme=format_prediction_cell(row["meme_label_name"], row["meme_score"]),
                 bert=format_prediction_cell(row["bert_label_name"], row["bert_score"]),
+                bert_meme=format_prediction_cell(row["bert_meme_label_name"], row["bert_meme_score"]),
             )
         )
 
@@ -208,11 +277,12 @@ def to_markdown(df: pd.DataFrame, summary: dict[str, object]) -> str:
             f"| baseline | {summary['overall_accuracy']['baseline']['accuracy']:.4f} |",
             f"| meme_features_v1 | {summary['overall_accuracy']['meme']['accuracy']:.4f} |",
             f"| bert | {summary['overall_accuracy']['bert']['accuracy']:.4f} |",
+            f"| bert_meme_fusion | {summary['overall_accuracy']['bert_meme']['accuracy']:.4f} |",
             "",
             "## 分类别准确率",
             "",
-            "| 类别 | 样本数 | baseline | meme_features_v1 | bert |",
-            "| --- | --- | --- | --- | --- |",
+            "| 类别 | 样本数 | baseline | meme_features_v1 | bert | bert_meme_fusion |",
+            "| --- | --- | --- | --- | --- | --- |",
         ]
     )
 
@@ -221,7 +291,8 @@ def to_markdown(df: pd.DataFrame, summary: dict[str, object]) -> str:
             f"| {category} | {values['baseline']['count']} | "
             f"{values['baseline']['accuracy']:.4f} | "
             f"{values['meme']['accuracy']:.4f} | "
-            f"{values['bert']['accuracy']:.4f} |"
+            f"{values['bert']['accuracy']:.4f} | "
+            f"{values['bert_meme']['accuracy']:.4f} |"
         )
 
     return "\n".join(lines)
@@ -248,10 +319,15 @@ def main() -> None:
         model_dir=args.bert_model_dir.resolve(),
         texts=texts,
     )
+    bert_meme_device, bert_meme_predictions = run_bert_meme_model(
+        model_dir=args.bert_meme_model_dir.resolve(),
+        texts=texts,
+    )
 
     add_prediction_columns(df, "baseline", baseline_predictions)
     add_prediction_columns(df, "meme", meme_predictions)
     add_prediction_columns(df, "bert", bert_predictions)
+    add_prediction_columns(df, "bert_meme", bert_meme_predictions)
 
     summary = build_summary(df)
     payload = {
@@ -259,6 +335,7 @@ def main() -> None:
             "baseline_mode": baseline_mode,
             "meme_mode": meme_mode,
             "bert_device": bert_device,
+            "bert_meme_device": bert_meme_device,
             "test_count": int(len(df)),
         },
         "summary": summary,

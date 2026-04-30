@@ -121,7 +121,7 @@ python scripts/compare_models_on_testset.py --output-csv back-end/model_compare_
 该脚本会：
 
 - 读取 `data/manual_test_set.csv`
-- 分别运行基线模型、模因特征模型和 BERT 模型
+- 分别运行基线模型、模因特征模型、BERT 模型和 BERT+模因特征融合模型
 - 输出 JSON 汇总和 Markdown 对比表
 - 可选保存详细结果 CSV
 
