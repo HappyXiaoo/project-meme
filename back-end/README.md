@@ -91,6 +91,30 @@ python scripts/train_bert_meme.py --smoke-test --train-sample-limit 128 --eval-s
 python scripts/train_bert_meme.py --model-name bert-base-chinese --epochs 2
 ```
 
+## BERT 二阶段微调方案
+
+如果希望在不修改 BERT 主体结构的前提下，进一步提升模型对模因式表达场景的适配能力，可以使用二阶段微调方案：
+
+1. 第一阶段：使用正式数据集训练原始 BERT
+2. 第二阶段：使用模因式表达增强训练集继续微调
+
+相关文件：
+
+- 增强训练集：`data/meme_augmented_train_set.csv`
+- 训练脚本：`python scripts/train_bert_stage2.py`
+
+smoke test 示例：
+
+```text
+python scripts/train_bert_stage2.py --smoke-test --train-sample-limit 32 --eval-sample-limit 16
+```
+
+正式训练示例：
+
+```text
+python scripts/train_bert_stage2.py --epochs 2
+```
+
 批量预测样例示例：
 
 ```text
