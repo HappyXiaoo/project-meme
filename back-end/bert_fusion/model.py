@@ -83,9 +83,23 @@ class BertMemeFusionModel(nn.Module):
             dropout=dropout,
             num_labels=num_labels,
         )
-        weight_file = model_dir / "pytorch_model.bin"
-        if not weight_file.exists():
-            raise FileNotFoundError(f"fusion model weight not found: {weight_file}")
-        state_dict = torch.load(weight_file, map_location="cpu")
+        bin_file = model_dir / "pytorch_model.bin"
+        safetensors_file = model_dir / "model.safetensors"
+
+        if bin_file.exists():
+            state_dict = torch.load(bin_file, map_location="cpu")
+        elif safetensors_file.exists():
+            try:
+                from safetensors.torch import load_file
+            except Exception as error:  # pragma: no cover
+                raise RuntimeError(
+                    "检测到 model.safetensors，但当前环境缺少 safetensors 依赖。"
+                ) from error
+            state_dict = load_file(str(safetensors_file), device="cpu")
+        else:
+            raise FileNotFoundError(
+                f"fusion model weight not found: {bin_file} or {safetensors_file}"
+            )
+
         model.load_state_dict(state_dict)
         return model
