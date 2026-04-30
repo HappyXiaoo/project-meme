@@ -16,7 +16,7 @@ from app.services.classifier import LABEL_MAPPING, TextMemeClassifier
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="在人工测试集上对比基线模型、模因特征模型、BERT 模型和融合模型。")
+    parser = argparse.ArgumentParser(description="在人工测试集上对比基线模型、模因特征模型、BERT 模型、融合模型和二阶段微调模型。")
     parser.add_argument(
         "--testset",
         type=Path,
@@ -52,6 +52,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=BACKEND_DIR / "artifacts-bert-meme-v1" / "model",
         help="BERT+模因特征融合模型目录。",
+    )
+    parser.add_argument(
+        "--bert-stage2-model-dir",
+        type=Path,
+        default=BACKEND_DIR / "artifacts-bert-stage2-v1" / "model",
+        help="BERT 二阶段微调模型目录。",
     )
     parser.add_argument(
         "--output-csv",
@@ -145,6 +151,11 @@ def run_bert_model(model_dir: Path, texts: list[str]) -> tuple[str, list[dict[st
     return device, predictions
 
 
+def run_bert_stage2_model(model_dir: Path, texts: list[str]) -> tuple[str, list[dict[str, object]]]:
+    # 二阶段微调后的模型仍然是标准 BERT 分类模型，直接复用原始 BERT 加载逻辑。
+    return run_bert_model(model_dir, texts)
+
+
 def run_bert_meme_model(model_dir: Path, texts: list[str]) -> tuple[str, list[dict[str, object]]]:
     try:
         import torch
@@ -219,7 +230,7 @@ def add_prediction_columns(
 
 
 def build_summary(df: pd.DataFrame) -> dict[str, object]:
-    model_prefixes = ["baseline", "meme", "bert", "bert_meme"]
+    model_prefixes = ["baseline", "meme", "bert", "bert_meme", "bert_stage2"]
     overall = {}
     by_category = {}
 
@@ -248,15 +259,15 @@ def format_prediction_cell(label_name: str, score: float) -> str:
 
 def to_markdown(df: pd.DataFrame, summary: dict[str, object]) -> str:
     lines = [
-        "## 四模型对比结果",
+        "## 五模型对比结果",
         "",
-        "| 编号 | 类别 | 预期结果 | 基线模型 | 模因特征模型 | BERT 模型 | 融合模型 |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| 编号 | 类别 | 预期结果 | 基线模型 | 模因特征模型 | BERT 模型 | 融合模型 | 二阶段微调 BERT |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
 
     for _, row in df.iterrows():
         lines.append(
-            "| {id} | {category} | {expected} | {baseline} | {meme} | {bert} | {bert_meme} |".format(
+            "| {id} | {category} | {expected} | {baseline} | {meme} | {bert} | {bert_meme} | {bert_stage2} |".format(
                 id=row["id"],
                 category=row["category"],
                 expected=LABEL_MAPPING[int(row["label"])],
@@ -264,6 +275,7 @@ def to_markdown(df: pd.DataFrame, summary: dict[str, object]) -> str:
                 meme=format_prediction_cell(row["meme_label_name"], row["meme_score"]),
                 bert=format_prediction_cell(row["bert_label_name"], row["bert_score"]),
                 bert_meme=format_prediction_cell(row["bert_meme_label_name"], row["bert_meme_score"]),
+                bert_stage2=format_prediction_cell(row["bert_stage2_label_name"], row["bert_stage2_score"]),
             )
         )
 
@@ -278,11 +290,12 @@ def to_markdown(df: pd.DataFrame, summary: dict[str, object]) -> str:
             f"| meme_features_v1 | {summary['overall_accuracy']['meme']['accuracy']:.4f} |",
             f"| bert | {summary['overall_accuracy']['bert']['accuracy']:.4f} |",
             f"| bert_meme_fusion | {summary['overall_accuracy']['bert_meme']['accuracy']:.4f} |",
+            f"| bert_stage2 | {summary['overall_accuracy']['bert_stage2']['accuracy']:.4f} |",
             "",
             "## 分类别准确率",
             "",
-            "| 类别 | 样本数 | baseline | meme_features_v1 | bert | bert_meme_fusion |",
-            "| --- | --- | --- | --- | --- | --- |",
+            "| 类别 | 样本数 | baseline | meme_features_v1 | bert | bert_meme_fusion | bert_stage2 |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
 
@@ -292,7 +305,8 @@ def to_markdown(df: pd.DataFrame, summary: dict[str, object]) -> str:
             f"{values['baseline']['accuracy']:.4f} | "
             f"{values['meme']['accuracy']:.4f} | "
             f"{values['bert']['accuracy']:.4f} | "
-            f"{values['bert_meme']['accuracy']:.4f} |"
+            f"{values['bert_meme']['accuracy']:.4f} | "
+            f"{values['bert_stage2']['accuracy']:.4f} |"
         )
 
     return "\n".join(lines)
@@ -323,11 +337,16 @@ def main() -> None:
         model_dir=args.bert_meme_model_dir.resolve(),
         texts=texts,
     )
+    bert_stage2_device, bert_stage2_predictions = run_bert_stage2_model(
+        model_dir=args.bert_stage2_model_dir.resolve(),
+        texts=texts,
+    )
 
     add_prediction_columns(df, "baseline", baseline_predictions)
     add_prediction_columns(df, "meme", meme_predictions)
     add_prediction_columns(df, "bert", bert_predictions)
     add_prediction_columns(df, "bert_meme", bert_meme_predictions)
+    add_prediction_columns(df, "bert_stage2", bert_stage2_predictions)
 
     summary = build_summary(df)
     payload = {
@@ -336,6 +355,7 @@ def main() -> None:
             "meme_mode": meme_mode,
             "bert_device": bert_device,
             "bert_meme_device": bert_meme_device,
+            "bert_stage2_device": bert_stage2_device,
             "test_count": int(len(df)),
         },
         "summary": summary,
